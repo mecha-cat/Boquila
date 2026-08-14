@@ -315,6 +315,7 @@ public class MainView {
             r.getTasks().addAll(tasks.getText().lines().map(String::trim)
                     .filter(l -> !l.isEmpty()).toList());
             r.setNotes(notes.getText());
+            r.setFileName(original.getFileName());
             return r;
         });
         return dialog.showAndWait();

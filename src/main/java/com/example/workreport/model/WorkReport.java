@@ -15,6 +15,7 @@ public class WorkReport {
     private String summary;
     private final List<String> tasks = new ArrayList<>();
     private String notes;
+    private String fileName;
 
     public WorkReport() {
     }
@@ -69,6 +70,14 @@ public class WorkReport {
 
     public void setNotes(String notes) {
         this.notes = notes;
+    }
+
+    public String getFileName() {
+        return fileName;
+    }
+
+    public void setFileName(String fileName) {
+        this.fileName = fileName;
     }
 
     public String getTimeRange() {

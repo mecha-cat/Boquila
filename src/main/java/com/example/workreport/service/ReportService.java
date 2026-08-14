@@ -61,7 +61,8 @@ public class ReportService {
     }
 
     public void delete(WorkReport report) throws IOException {
-        Files.deleteIfExists(reportsDir.resolve(fileNameFor(report)));
+        String name = report.getFileName() != null ? report.getFileName() : fileNameFor(report);
+        Files.deleteIfExists(reportsDir.resolve(name));
     }
 
     public List<WorkReport> search(String query) {
@@ -112,8 +113,14 @@ public class ReportService {
 
     private void write(WorkReport report) throws IOException {
         ensureReportsDir();
-        Path file = reportsDir.resolve(fileNameFor(report));
-        Files.writeString(file, toText(report));
+        Path target = reportsDir.resolve(fileNameFor(report));
+        if (report.getFileName() != null) {
+            Path source = reportsDir.resolve(report.getFileName());
+            if (!source.equals(target) && Files.exists(source)) {
+                Files.delete(source);
+            }
+        }
+        Files.writeString(target, toText(report));
     }
 
     private java.util.Optional<WorkReport> parseFile(Path file) {
@@ -124,6 +131,7 @@ public class ReportService {
                     || report.getDeveloper().isBlank()) {
                 return java.util.Optional.empty();
             }
+            report.setFileName(file.getFileName().toString());
             return java.util.Optional.of(report);
         } catch (IOException e) {
             System.err.println("Could not read report " + file + ": " + e.getMessage());

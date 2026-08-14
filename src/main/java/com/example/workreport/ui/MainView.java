@@ -39,6 +39,8 @@ public class MainView {
     private final Label gitStatus = new Label("Git: -");
     private final Label unreadableLabel = new Label();
     private final TextArea detail = new TextArea();
+    private final Button editButton = new Button("Edit");
+    private final Button deleteButton = new Button("Delete");
     private Runnable onChangeProject;
 
     public MainView(Path projectDir) {
@@ -107,6 +109,16 @@ public class MainView {
         table.setItems(reports);
         table.getSelectionModel().selectedItemProperty()
                 .addListener((obs, o, n) -> showDetail(n));
+        editButton.disableProperty().bind(
+                table.getSelectionModel().selectedItemProperty().isNull());
+        deleteButton.disableProperty().bind(
+                table.getSelectionModel().selectedItemProperty().isNull());
+        table.setOnMouseClicked(e -> {
+            if (e.getClickCount() == 2
+                    && table.getSelectionModel().getSelectedItem() != null) {
+                editSelected();
+            }
+        });
 
         HBox bar = new HBox(8, searchField, gitStatus, unreadableLabel);
         bar.setPadding(new Insets(8, 10, 4, 10));
@@ -121,9 +133,9 @@ public class MainView {
         detail.setPrefHeight(220);
         detail.setWrapText(true);
 
-        Button edit = new Button("Edit");
+        Button edit = editButton;
         edit.setOnAction(e -> editSelected());
-        Button delete = new Button("Delete");
+        Button delete = deleteButton;
         delete.setOnAction(e -> deleteSelected());
 
         HBox buttons = new HBox(8, edit, delete);
@@ -227,10 +239,17 @@ public class MainView {
             try {
                 reportService.create(saved);
                 refresh();
+                selectReport(saved);
             } catch (IOException ex) {
                 alert("Could not save report:\n" + ex.getMessage());
             }
         });
+    }
+
+    private void selectReport(WorkReport saved) {
+        String name = ReportService.fileNameFor(saved);
+        reports.stream().filter(r -> name.equals(r.getFileName())).findFirst()
+                .ifPresent(reports -> table.getSelectionModel().select(reports));
     }
 
     private void editSelected() {

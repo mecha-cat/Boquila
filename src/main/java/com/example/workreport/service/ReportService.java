@@ -72,6 +72,31 @@ public class ReportService {
         return list().stream().filter(r -> matches(r, q)).toList();
     }
 
+    public long countUnreadable() {
+        if (!Files.isDirectory(reportsDir)) {
+            return 0;
+        }
+        long count = 0;
+        try (Stream<Path> stream = Files.list(reportsDir)) {
+            for (Path p : stream
+                    .filter(f -> f.toString().toLowerCase(Locale.ROOT).endsWith(".txt"))
+                    .toList()) {
+                try {
+                    WorkReport r = fromText(Files.readString(p));
+                    if (r.getDate() == null || r.getDeveloper() == null
+                            || r.getDeveloper().isBlank()) {
+                        count++;
+                    }
+                } catch (IOException e) {
+                    count++;
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("Could not scan reports: " + e.getMessage());
+        }
+        return count;
+    }
+
     private boolean matches(WorkReport r, String q) {
         return contains(r.getDate(), q)
                 || contains(r.getDeveloper(), q)

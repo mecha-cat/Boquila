@@ -37,6 +37,7 @@ public class MainView {
     private final ObservableList<WorkReport> reports = FXCollections.observableArrayList();
     private final TextField searchField = new TextField();
     private final Label gitStatus = new Label("Git: -");
+    private final Label unreadableLabel = new Label();
     private final TextArea detail = new TextArea();
     private Runnable onChangeProject;
 
@@ -84,6 +85,7 @@ public class MainView {
         searchField.setPrefWidth(280);
 
         gitStatus.setPadding(new Insets(0, 10, 0, 0));
+        unreadableLabel.setStyle("-fx-text-fill: #c0392b;");
 
         TableColumn<WorkReport, String> dateCol = new TableColumn<>("Date");
         dateCol.setCellValueFactory(new PropertyValueFactory<>("date"));
@@ -106,7 +108,7 @@ public class MainView {
         table.getSelectionModel().selectedItemProperty()
                 .addListener((obs, o, n) -> showDetail(n));
 
-        HBox bar = new HBox(8, searchField, gitStatus);
+        HBox bar = new HBox(8, searchField, gitStatus, unreadableLabel);
         bar.setPadding(new Insets(8, 10, 4, 10));
 
         VBox box = new VBox(bar, table);
@@ -137,6 +139,10 @@ public class MainView {
 
     private void refreshTable() {
         reports.setAll(reportService.search(searchField.getText()));
+        long unreadable = reportService.countUnreadable();
+        unreadableLabel.setText(unreadable > 0
+                ? unreadable + " report file(s) could not be parsed."
+                : "");
         showDetail(table.getSelectionModel().getSelectedItem());
     }
 
@@ -183,6 +189,16 @@ public class MainView {
         }
         if (!gitService.isRepository(projectDir)) {
             alert("This directory is not a Git repository.");
+            return;
+        }
+        GitService.Result before = gitService.status(projectDir);
+        boolean hasChanges = before.success() && before.output().lines()
+                .anyMatch(l -> !l.startsWith("##") && !l.isBlank());
+        if (!hasChanges) {
+            new javafx.scene.control.Alert(
+                    javafx.scene.control.Alert.AlertType.INFORMATION,
+                    "Nothing to commit — no changes.")
+                    .showAndWait();
             return;
         }
         GitService.Result add = gitService.add(projectDir, "reports");

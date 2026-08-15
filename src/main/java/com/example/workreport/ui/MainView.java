@@ -3,14 +3,19 @@ package com.example.workreport.ui;
 import com.example.workreport.model.WorkReport;
 import com.example.workreport.service.GitService;
 import com.example.workreport.service.ReportService;
+import com.example.workreport.util.DeveloperStore;
 
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
+import javafx.geometry.Bounds;
 import javafx.geometry.Insets;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.ComboBox;
+import javafx.scene.control.DatePicker;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
+import javafx.scene.control.ListView;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextArea;
@@ -20,11 +25,15 @@ import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
+import javafx.stage.Popup;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
+import java.time.LocalTime;
+import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
 public class MainView {
@@ -32,10 +41,13 @@ public class MainView {
     private final Path projectDir;
     private final ReportService reportService;
     private final GitService gitService = new GitService();
+    private final DeveloperStore developerStore = new DeveloperStore();
 
     private final TableView<WorkReport> table = new TableView<>();
     private final ObservableList<WorkReport> reports = FXCollections.observableArrayList();
     private final TextField searchField = new TextField();
+    private final DatePicker dateFilter = new DatePicker(LocalDate.now());
+    private final ComboBox<String> developerFilter = new ComboBox<>();
     private final Label gitStatus = new Label("Git: -");
     private final Label unreadableLabel = new Label();
     private final TextArea detail = new TextArea();
@@ -46,6 +58,8 @@ public class MainView {
     public MainView(Path projectDir) {
         this.projectDir = projectDir;
         this.reportService = new ReportService(projectDir);
+        this.developerStore.rememberAll(reportService.list().stream()
+                .map(WorkReport::getDeveloper).toList());
     }
 
     public void setOnChangeProject(Runnable onChangeProject) {
@@ -120,12 +134,39 @@ public class MainView {
             }
         });
 
+        HBox filterBar = buildFilterBar();
         HBox bar = new HBox(8, searchField, gitStatus, unreadableLabel);
         bar.setPadding(new Insets(8, 10, 4, 10));
 
-        VBox box = new VBox(bar, table);
+        VBox box = new VBox(filterBar, bar, table);
         VBox.setVgrow(table, Priority.ALWAYS);
         return box;
+    }
+
+    private HBox buildFilterBar() {
+        Label dateLabel = new Label("Date:");
+        dateLabel.setPadding(new Insets(5, 0, 0, 0));
+        dateFilter.setPromptText("Date");
+        dateFilter.valueProperty().addListener((obs, o, n) -> refreshTable());
+
+        Label devLabel = new Label("Developer:");
+        devLabel.setPadding(new Insets(5, 0, 0, 0));
+        developerFilter.setPrefWidth(180);
+        developerFilter.setPromptText("All");
+        developerFilter.valueProperty().addListener((obs, o, n) -> refreshTable());
+
+        Button resetFilters = new Button("Reset Filters");
+        resetFilters.setOnAction(e -> resetFilters());
+
+        HBox bar = new HBox(8,
+                dateLabel, dateFilter, devLabel, developerFilter, resetFilters);
+        bar.setPadding(new Insets(8, 10, 0, 10));
+        return bar;
+    }
+
+    private void resetFilters() {
+        dateFilter.setValue(LocalDate.now());
+        developerFilter.setValue("All");
     }
 
     private VBox detailArea() {
@@ -150,12 +191,39 @@ public class MainView {
     }
 
     private void refreshTable() {
-        reports.setAll(reportService.search(searchField.getText()));
+        populateDevelopers();
+        LocalDate date = dateFilter.getValue();
+        String dev = developerFilter.getValue();
+        List<WorkReport> all = reportService.search(searchField.getText());
+        reports.setAll(all.stream()
+                .filter(r -> date == null || date.equals(r.getDate()))
+                .filter(r -> dev == null || dev.isBlank() || "All".equals(dev)
+                        || dev.equals(r.getDeveloper()))
+                .toList());
         long unreadable = reportService.countUnreadable();
         unreadableLabel.setText(unreadable > 0
                 ? unreadable + " report file(s) could not be parsed."
                 : "");
         showDetail(table.getSelectionModel().getSelectedItem());
+    }
+
+    private void populateDevelopers() {
+        String selected = developerFilter.getValue();
+        List<String> names = reportService.list().stream()
+                .map(WorkReport::getDeveloper)
+                .filter(d -> d != null && !d.isBlank())
+                .distinct()
+                .sorted()
+                .toList();
+        ObservableList<String> items = FXCollections.observableArrayList();
+        items.add("All");
+        items.addAll(names);
+        developerFilter.setItems(items);
+        if (selected != null && items.contains(selected)) {
+            developerFilter.setValue(selected);
+        } else {
+            developerFilter.setValue("All");
+        }
     }
 
     private void showDetail(WorkReport r) {
@@ -238,6 +306,7 @@ public class MainView {
         editor(r).ifPresent(saved -> {
             try {
                 reportService.create(saved);
+                developerStore.remember(saved.getDeveloper());
                 refresh();
                 selectReport(saved);
             } catch (IOException ex) {
@@ -247,7 +316,7 @@ public class MainView {
     }
 
     private void selectReport(WorkReport saved) {
-        String name = ReportService.fileNameFor(saved);
+        String name = saved.getFileName();
         reports.stream().filter(r -> name.equals(r.getFileName())).findFirst()
                 .ifPresent(reports -> table.getSelectionModel().select(reports));
     }
@@ -260,6 +329,7 @@ public class MainView {
         editor(selected).ifPresent(saved -> {
             try {
                 reportService.save(saved);
+                developerStore.remember(saved.getDeveloper());
                 refresh();
             } catch (IOException ex) {
                 alert("Could not save report:\n" + ex.getMessage());
@@ -299,11 +369,11 @@ public class MainView {
 
         TextField date = new TextField(original.getDate() == null
                 ? LocalDate.now().toString() : original.getDate().toString());
-        TextField dev = new TextField(original.getDeveloper());
+        TextField dev = developerField(initialDeveloper(original));
         TextField start = new TextField(original.getStartTime() == null
                 ? "" : original.getStartTime().toString());
         TextField end = new TextField(original.getEndTime() == null
-                ? "" : original.getEndTime().toString());
+                ? LocalTime.now().toString() : original.getEndTime().toString());
         TextArea summary = new TextArea(original.getSummary());
         summary.setPromptText("Summary");
         summary.setPrefRowCount(3);
@@ -338,6 +408,64 @@ public class MainView {
             return r;
         });
         return dialog.showAndWait();
+    }
+
+    private String initialDeveloper(WorkReport original) {
+        if (original.getDeveloper() != null && !original.getDeveloper().isBlank()) {
+            return original.getDeveloper();
+        }
+        List<String> known = developerStore.all();
+        if (known.size() == 1) {
+            return known.get(0);
+        }
+        return null;
+    }
+
+    private TextField developerField(String initial) {
+        TextField field = new TextField();
+        field.setPromptText("Developer");
+        field.setPrefWidth(220);
+
+        ListView<String> suggestions = new ListView<>();
+        suggestions.setPrefWidth(220);
+        suggestions.setPrefHeight(140);
+
+        Popup popup = new Popup();
+        popup.setAutoHide(true);
+        popup.getContent().add(suggestions);
+
+        List<String> allNames = developerStore.all();
+
+        field.textProperty().addListener((obs, o, n) -> {
+            String q = n == null ? "" : n.trim().toLowerCase(Locale.ROOT);
+            ObservableList<String> filtered = FXCollections.observableArrayList();
+            for (String name : allNames) {
+                if (q.isEmpty() || name.toLowerCase(Locale.ROOT).contains(q)) {
+                    filtered.add(name);
+                }
+            }
+            suggestions.setItems(filtered);
+            if (filtered.isEmpty()) {
+                popup.hide();
+            } else if (field.isFocused() && !popup.isShowing()) {
+                Bounds b = field.localToScreen(field.getBoundsInLocal());
+                popup.show(field, b.getMinX(), b.getMaxY());
+            }
+        });
+
+        suggestions.getSelectionModel().selectedItemProperty()
+                .addListener((obs, o, n) -> {
+                    if (n != null) {
+                        field.setText(n);
+                        popup.hide();
+                        field.positionCaret(field.getText().length());
+                    }
+                });
+
+        if (initial != null && !initial.isBlank()) {
+            field.setText(initial);
+        }
+        return field;
     }
 
     private VBox labeled(String text, javafx.scene.Node node) {

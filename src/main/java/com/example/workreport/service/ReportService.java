@@ -3,10 +3,14 @@ package com.example.workreport.service;
 import com.example.workreport.model.WorkReport;
 
 import java.io.IOException;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -17,6 +21,9 @@ import java.util.stream.Stream;
 public class ReportService {
 
     public static final String REPORTS_DIR_NAME = "reports";
+
+    private static final DateTimeFormatter TIME_STAMP =
+            DateTimeFormatter.ofPattern("HHmmssSSS");
 
     private final Path reportsDir;
 
@@ -53,11 +60,26 @@ public class ReportService {
 
     public void create(WorkReport report) throws IOException {
         ensureReportsDir();
-        write(report);
+        String name = writeUnique(report);
+        report.setFileName(name);
     }
 
     public void save(WorkReport report) throws IOException {
-        write(report);
+        ensureReportsDir();
+        String current = report.getFileName();
+        String desired = fileNameFor(report);
+        if (current == null || current.isBlank()) {
+            current = desired;
+            report.setFileName(current);
+        }
+        Path target = reportsDir.resolve(current);
+        if (!desired.equals(current) && !Files.exists(reportsDir.resolve(desired))) {
+            Files.writeString(reportsDir.resolve(desired), toText(report));
+            Files.deleteIfExists(target);
+            report.setFileName(desired);
+        } else {
+            Files.writeString(target, toText(report));
+        }
     }
 
     public void delete(WorkReport report) throws IOException {
@@ -111,16 +133,32 @@ public class ReportService {
         return value != null && value.toString().toLowerCase(Locale.ROOT).contains(q);
     }
 
-    private void write(WorkReport report) throws IOException {
-        ensureReportsDir();
-        Path target = reportsDir.resolve(fileNameFor(report));
-        if (report.getFileName() != null) {
-            Path source = reportsDir.resolve(report.getFileName());
-            if (!source.equals(target) && Files.exists(source)) {
-                Files.delete(source);
+    private String writeUnique(WorkReport report) throws IOException {
+        String base = fileNameFor(report);
+        String stamp = LocalDateTime.now().format(TIME_STAMP);
+        int attempt = 0;
+        while (true) {
+            String candidate = candidateName(base, stamp, attempt);
+            try {
+                Files.writeString(reportsDir.resolve(candidate), toText(report),
+                        StandardOpenOption.CREATE_NEW);
+                return candidate;
+            } catch (FileAlreadyExistsException e) {
+                attempt++;
+                if (attempt > 100_000) {
+                    throw new IOException("Could not generate a unique report filename.");
+                }
             }
         }
-        Files.writeString(target, toText(report));
+    }
+
+    private static String candidateName(String base, String stamp, int attempt) {
+        if (attempt == 0) {
+            return base;
+        }
+        String core = base.substring(0, base.length() - ".txt".length());
+        String suffix = attempt == 1 ? stamp : stamp + "-" + attempt;
+        return core + "-" + suffix + ".txt";
     }
 
     private java.util.Optional<WorkReport> parseFile(Path file) {

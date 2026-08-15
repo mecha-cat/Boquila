@@ -1,7 +1,9 @@
 package com.example.workreport.service;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -14,9 +16,22 @@ public class GitService {
 
     private static final long TIMEOUT_SECONDS = 60;
 
+    private String gitExecutable() {
+        String appDir = System.getProperty("app.dir");
+        if (appDir != null) {
+            for (String layout : new String[]{"app", "."}) {
+                Path bundled = Path.of(appDir, layout, "git", "cmd", "git.exe");
+                if (Files.exists(bundled)) {
+                    return bundled.toString();
+                }
+            }
+        }
+        return "git";
+    }
+
     public boolean isAvailable() {
         try {
-            Process p = new ProcessBuilder("git", "--version")
+            Process p = new ProcessBuilder(gitExecutable(), "--version")
                     .redirectErrorStream(true).start();
             boolean ok = p.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             return ok && p.exitValue() == 0;
@@ -56,12 +71,22 @@ public class GitService {
 
     private Result run(Path workDir, String... args) {
         List<String> cmd = new ArrayList<>();
-        cmd.add("git");
+        String git = gitExecutable();
+        cmd.add(git);
         cmd.addAll(List.of(args));
         try {
             ProcessBuilder pb = new ProcessBuilder(cmd);
             if (workDir != null) {
                 pb.directory(workDir.toFile());
+            }
+            if (!"git".equals(git)) {
+                Path gitRoot = Path.of(git).getParent().getParent();
+                String prefix = String.join(File.pathSeparator,
+                        gitRoot.resolve("cmd").toString(),
+                        gitRoot.resolve("mingw64").resolve("bin").toString(),
+                        gitRoot.resolve("usr").resolve("bin").toString());
+                String oldPath = pb.environment().getOrDefault("PATH", "");
+                pb.environment().put("PATH", prefix + File.pathSeparator + oldPath);
             }
             pb.redirectErrorStream(true);
             Process p = pb.start();

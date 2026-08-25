@@ -127,7 +127,7 @@ The build process will perform the following steps:
 If the build completes successfully, the `.deb` package will be generated in:
 
 ```text
-target/dist/Boquila_1.0.0_amd64.deb
+target/dist/boquila_1.0.0_amd64.deb
 ```
 
 The generated `.deb` file is the Linux installation package.

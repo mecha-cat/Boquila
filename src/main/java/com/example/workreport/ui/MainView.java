@@ -78,7 +78,16 @@ public class MainView {
         root.setCenter(buildTable());
         root.setBottom(detailArea());
         refresh();
+        autoSync();
         return root;
+    }
+
+    private void autoSync() {
+        if (!gitService.isAvailable() || !gitService.isRepository()) {
+            return;
+        }
+        gitService.pull();
+        refresh();
     }
 
     private HBox buildHeader() {

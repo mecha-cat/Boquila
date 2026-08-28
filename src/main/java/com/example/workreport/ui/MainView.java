@@ -48,6 +48,7 @@ public class MainView {
     private final TextField searchField = new TextField();
     private final DatePicker dateFilter = new DatePicker(LocalDate.now());
     private final ComboBox<String> developerFilter = new ComboBox<>();
+    private final ComboBox<String> tagFilter = new ComboBox<>();
     private final Label gitStatus = new Label("Git: -");
     private final Label unreadableLabel = new Label();
     private final TextArea detail = new TextArea();
@@ -156,11 +157,17 @@ public class MainView {
         developerFilter.setPromptText("All");
         developerFilter.valueProperty().addListener((obs, o, n) -> refreshTable());
 
+        Label tagLabel = new Label("Tag:");
+        tagLabel.setPadding(new Insets(5, 0, 0, 0));
+        tagFilter.setPrefWidth(160);
+        tagFilter.setPromptText("All");
+        tagFilter.valueProperty().addListener((obs, o, n) -> refreshTable());
+
         Button resetFilters = new Button("Reset Filters");
         resetFilters.setOnAction(e -> resetFilters());
 
         HBox bar = new HBox(8,
-                dateLabel, dateFilter, devLabel, developerFilter, resetFilters);
+                dateLabel, dateFilter, devLabel, developerFilter, tagLabel, tagFilter, resetFilters);
         bar.setPadding(new Insets(8, 10, 0, 10));
         return bar;
     }
@@ -193,13 +200,17 @@ public class MainView {
 
     private void refreshTable() {
         populateDevelopers();
+        populateTags();
         LocalDate date = dateFilter.getValue();
         String dev = developerFilter.getValue();
+        String tag = tagFilter.getValue();
         List<WorkReport> all = reportService.search(searchField.getText());
         reports.setAll(all.stream()
                 .filter(r -> date == null || date.equals(r.getDate()))
                 .filter(r -> dev == null || dev.isBlank() || "All".equals(dev)
                         || dev.equals(r.getDeveloper()))
+                .filter(r -> tag == null || tag.isBlank() || "All".equals(tag)
+                        || r.getTags().contains(tag))
                 .toList());
         long unreadable = reportService.countUnreadable();
         unreadableLabel.setText(unreadable > 0
@@ -224,6 +235,25 @@ public class MainView {
             developerFilter.setValue(selected);
         } else {
             developerFilter.setValue("All");
+        }
+    }
+
+    private void populateTags() {
+        String selected = tagFilter.getValue();
+        List<String> tags = reportService.list().stream()
+                .flatMap(r -> r.getTags().stream())
+                .filter(t -> t != null && !t.isBlank())
+                .distinct()
+                .sorted()
+                .toList();
+        ObservableList<String> items = FXCollections.observableArrayList();
+        items.add("All");
+        items.addAll(tags);
+        tagFilter.setItems(items);
+        if (selected != null && items.contains(selected)) {
+            tagFilter.setValue(selected);
+        } else {
+            tagFilter.setValue("All");
         }
     }
 
@@ -384,11 +414,14 @@ public class MainView {
         TextArea notes = new TextArea(original.getNotes());
         notes.setPromptText("Notes");
         notes.setPrefRowCount(2);
+        TextField tags = new TextField(String.join(" ", original.getTags()));
+        tags.setPromptText("Tags (space-separated, # optional)");
 
         VBox form = new VBox(6,
                 labeled("Date", date), labeled("Developer", dev),
                 labeled("Start Time (HH:MM)", start), labeled("End Time (HH:MM)", end),
-                labeled("Summary", summary), labeled("Tasks", tasks), labeled("Notes", notes));
+                labeled("Summary", summary), labeled("Tasks", tasks),
+                labeled("Tags", tags), labeled("Notes", notes));
         form.setPadding(new Insets(12));
         dialog.getDialogPane().setContent(form);
 
@@ -404,6 +437,10 @@ public class MainView {
             r.setSummary(summary.getText());
             r.getTasks().addAll(tasks.getText().lines().map(String::trim)
                     .filter(l -> !l.isEmpty()).toList());
+            r.setTags(tags.getText().lines().map(String::trim)
+                    .filter(l -> !l.isEmpty())
+                    .map(t -> t.startsWith("#") ? t.substring(1) : t)
+                    .toList());
             r.setNotes(notes.getText());
             r.setFileName(original.getFileName());
             return r;

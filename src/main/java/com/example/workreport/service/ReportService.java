@@ -166,6 +166,7 @@ public class ReportService {
                 || contains(r.getSummary(), q)
                 || contains(r.getNotes(), q)
                 || r.getTasks().stream().anyMatch(t -> contains(t, q))
+                || r.getTags().stream().anyMatch(t -> contains(t, q))
                 || contains(r.getTimeRange(), q);
     }
 
@@ -231,6 +232,8 @@ public class ReportService {
         append(sb, "Developer", nz(r.getDeveloper()));
         append(sb, "Start Time", r.getStartTime() == null ? "" : r.getStartTime().toString());
         append(sb, "End Time", r.getEndTime() == null ? "" : r.getEndTime().toString());
+        append(sb, "Tags", r.getTags().stream()
+                .map(t -> "#" + t).reduce((a, b) -> a + " " + b).orElse(""));
         sb.append('\n');
         sb.append("## Summary\n\n").append(nz(r.getSummary())).append('\n');
         sb.append("\n## Tasks\n\n");
@@ -305,6 +308,7 @@ public class ReportService {
             case "Developer" -> r.setDeveloper(value);
             case "Start Time" -> r.setStartTime(parseTime(value));
             case "End Time" -> r.setEndTime(parseTime(value));
+            case "Tags" -> r.setTags(parseTags(value));
             default -> { }
         }
     }
@@ -336,6 +340,19 @@ public class ReportService {
             sb.append('\n');
         }
         sb.append(line);
+    }
+
+    private static List<String> parseTags(String value) {
+        List<String> tags = new ArrayList<>();
+        if (value.isEmpty()) {
+            return tags;
+        }
+        for (String token : value.split("\\s+")) {
+            if (!token.isEmpty()) {
+                tags.add(token.startsWith("#") ? token.substring(1) : token);
+            }
+        }
+        return tags;
     }
 
     private static void append(StringBuilder sb, String key, String value) {

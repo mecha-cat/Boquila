@@ -16,6 +16,7 @@ public class WorkReport {
     private final List<String> tasks = new ArrayList<>();
     private String notes;
     private String fileName;
+    private final List<String> tags = new ArrayList<>();
 
     public WorkReport() {
     }
@@ -80,6 +81,17 @@ public class WorkReport {
         this.fileName = fileName;
     }
 
+    public List<String> getTags() {
+        return tags;
+    }
+
+    public void setTags(List<String> tags) {
+        this.tags.clear();
+        if (tags != null) {
+            this.tags.addAll(tags);
+        }
+    }
+
     public String getTimeRange() {
         if (startTime == null && endTime == null) {
             return "";
@@ -103,11 +115,12 @@ public class WorkReport {
                 && Objects.equals(endTime, that.endTime)
                 && Objects.equals(summary, that.summary)
                 && Objects.equals(tasks, that.tasks)
-                && Objects.equals(notes, that.notes);
+                && Objects.equals(notes, that.notes)
+                && Objects.equals(tags, that.tags);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(date, developer, startTime, endTime, summary, tasks, notes);
+        return Objects.hash(date, developer, startTime, endTime, summary, tasks, notes, tags);
     }
 }

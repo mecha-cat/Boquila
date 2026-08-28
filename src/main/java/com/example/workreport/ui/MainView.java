@@ -405,7 +405,7 @@ public class MainView {
                 ? LocalDate.now().toString() : original.getDate().toString());
         TextField dev = developerField(initialDeveloper(original));
         TextField start = new TextField(original.getStartTime() == null
-                ? "" : original.getStartTime().toString());
+                ? LocalTime.now().toString() : original.getStartTime().toString());
         TextField end = new TextField(original.getEndTime() == null
                 ? LocalTime.now().toString() : original.getEndTime().toString());
         TextArea summary = new TextArea(original.getSummary());
@@ -423,9 +423,55 @@ public class MainView {
         Label autoSave = new Label();
         autoSave.setStyle("-fx-text-fill: #777;");
 
+        Label elapsed = new Label();
+        Button startBtn = new Button("Start Work");
+        Button pauseBtn = new Button("Pause");
+        Button stopBtn = new Button("Stop");
+        final boolean[] running = {false};
+        final boolean[] paused = {false};
+        final long[] startedAt = {0};
+        final long[] accumulated = {0};
+        final LocalTime[] startT = {null};
+
+        startBtn.setOnAction(e -> {
+            if (running[0] && !paused[0]) {
+                return;
+            }
+            if (!running[0]) {
+                startT[0] = LocalTime.now();
+                accumulated[0] = 0;
+                start.setText(startT[0].toString());
+            }
+            startedAt[0] = System.currentTimeMillis();
+            running[0] = true;
+            paused[0] = false;
+        });
+        pauseBtn.setOnAction(e -> {
+            if (running[0] && !paused[0]) {
+                accumulated[0] += System.currentTimeMillis() - startedAt[0];
+                paused[0] = true;
+            }
+        });
+        stopBtn.setOnAction(e -> {
+            if (running[0]) {
+                accumulated[0] += System.currentTimeMillis() - startedAt[0];
+                running[0] = false;
+                paused[0] = false;
+                if (startT[0] != null) {
+                    start.setText(startT[0].toString());
+                    end.setText(startT[0]
+                            .plus(java.time.Duration.ofMillis(accumulated[0])).toString());
+                }
+                elapsed.setText("Total: " + formatDuration(accumulated[0]));
+            }
+        });
+
+        HBox timeBox = new HBox(8, startBtn, pauseBtn, stopBtn, elapsed);
+
         VBox form = new VBox(6,
                 labeled("Date", date), labeled("Developer", dev),
                 labeled("Start Time (HH:MM)", start), labeled("End Time (HH:MM)", end),
+                timeBox,
                 labeled("Summary", summary), labeled("Tasks", tasks),
                 labeled("Tags", tags), labeled("Notes", notes), autoSave);
         form.setPadding(new Insets(12));
@@ -449,6 +495,12 @@ public class MainView {
             if (lastSave[0] >= 0) {
                 long ago = System.currentTimeMillis() / 1000 - lastSave[0];
                 autoSave.setText("Auto-saved " + ago + "s ago");
+            }
+            if (running[0]) {
+                long ms = accumulated[0]
+                        + (paused[0] ? 0 : System.currentTimeMillis() - startedAt[0]);
+                elapsed.setText(paused[0] ? "Paused — " + formatDuration(ms)
+                        : "Total: " + formatDuration(ms));
             }
         }));
         ticker.setCycleCount(Timeline.INDEFINITE);
@@ -565,6 +617,13 @@ public class MainView {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private static String formatDuration(long millis) {
+        long totalMin = millis / 60_000;
+        long h = totalMin / 60;
+        long m = totalMin % 60;
+        return h + "h " + m + "m";
     }
 
     private void alert(String message) {

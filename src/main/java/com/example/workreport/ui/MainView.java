@@ -40,7 +40,7 @@ public class MainView {
 
     private final Path projectDir;
     private final ReportService reportService;
-    private final GitService gitService = new GitService();
+    private final GitService gitService;
     private final DeveloperStore developerStore = new DeveloperStore();
 
     private final TableView<WorkReport> table = new TableView<>();
@@ -58,6 +58,7 @@ public class MainView {
     public MainView(Path projectDir) {
         this.projectDir = projectDir;
         this.reportService = new ReportService(projectDir);
+        this.gitService = new GitService(projectDir);
         this.developerStore.rememberAll(reportService.list().stream()
                 .map(WorkReport::getDeveloper).toList());
     }
@@ -239,7 +240,7 @@ public class MainView {
             gitStatus.setText("Git: not installed");
             return;
         }
-        GitService.Result s = gitService.status(projectDir);
+        GitService.Result s = gitService.status();
         if (!s.success()) {
             gitStatus.setText("Git: error");
             return;
@@ -254,7 +255,7 @@ public class MainView {
             alert("Git is not installed.");
             return;
         }
-        GitService.Result r = gitService.pull(projectDir);
+        GitService.Result r = gitService.pull();
         if (!r.success()) {
             alert("Pull failed:\n" + r.output()
                     + "\n\nIf this is a conflict, resolve it in Git first.");
@@ -267,11 +268,11 @@ public class MainView {
             alert("Git is not installed.");
             return;
         }
-        if (!gitService.isRepository(projectDir)) {
+        if (!gitService.isRepository()) {
             alert("This directory is not a Git repository.");
             return;
         }
-        GitService.Result before = gitService.status(projectDir);
+        GitService.Result before = gitService.status();
         boolean hasChanges = before.success() && before.output().lines()
                 .anyMatch(l -> !l.startsWith("##") && !l.isBlank());
         if (!hasChanges) {
@@ -281,18 +282,18 @@ public class MainView {
                     .showAndWait();
             return;
         }
-        GitService.Result add = gitService.add(projectDir, "reports");
+        GitService.Result add = gitService.add("work-reports");
         if (!add.success()) {
             alert("git add failed:\n" + add.output());
             return;
         }
         String message = "Work report update " + LocalDate.now();
-        GitService.Result commit = gitService.commit(projectDir, message);
+        GitService.Result commit = gitService.commit(message);
         if (!commit.success()) {
             alert("git commit failed:\n" + commit.output());
             return;
         }
-        GitService.Result push = gitService.push(projectDir);
+        GitService.Result push = gitService.push();
         if (!push.success()) {
             alert("git push failed:\n" + push.output());
             return;

@@ -16,7 +16,6 @@ import java.nio.file.Path;
 public class Main extends Application {
 
     private final AppConfig config = new AppConfig();
-    private final GitService gitService = new GitService();
     private Stage stage;
 
     public static void main(String[] args) {
@@ -35,7 +34,7 @@ public class Main extends Application {
         String stored = config.getProjectPath();
         if (stored != null && !stored.isBlank()) {
             Path p = Path.of(stored);
-            if (Files.isDirectory(p) && gitService.isRepository(p)) {
+            if (Files.isDirectory(p) && new GitService(p).isRepository()) {
                 return p;
             }
         }
@@ -50,7 +49,7 @@ public class Main extends Application {
             if (dir == null) {
                 return null;
             }
-            if (!gitService.isRepository(dir)) {
+            if (!new GitService(dir).isRepository()) {
                 new Alert(Alert.AlertType.ERROR,
                         "Selected directory is not a Git repository.").showAndWait();
                 continue;

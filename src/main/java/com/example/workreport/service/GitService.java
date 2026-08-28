@@ -5,16 +5,27 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 public class GitService {
+
+    public static final String REPORTS_BRANCH = "work-reports";
+    public static final String REPORTS_DIR = "work-reports";
 
     public record Result(boolean success, String output) {
     }
 
     private static final long TIMEOUT_SECONDS = 60;
+
+    private final Path projectDir;
+
+    public GitService(Path projectDir) {
+        this.projectDir = projectDir;
+    }
 
     private String gitExecutable() {
         String appDir = System.getProperty("app.dir");
@@ -43,30 +54,113 @@ public class GitService {
         }
     }
 
-    public boolean isRepository(Path projectDir) {
+    public boolean isRepository() {
         return run(projectDir, "rev-parse", "--is-inside-work-tree").success();
     }
 
-    public Result status(Path projectDir) {
-        return run(projectDir, "status", "--short", "--branch");
+    public Result status() {
+        try {
+            return run(branchWorktree(), "status", "--short", "--branch");
+        } catch (IOException e) {
+            return new Result(false, e.getMessage());
+        }
     }
 
-    public Result pull(Path projectDir) {
-        return run(projectDir, "pull");
+    public Result pull() {
+        try {
+            return run(branchWorktree(), "pull");
+        } catch (IOException e) {
+            return new Result(false, e.getMessage());
+        }
     }
 
-    public Result add(Path projectDir, String... paths) {
-        List<String> args = new ArrayList<>(List.of("add"));
-        args.addAll(List.of(paths));
-        return run(projectDir, args.toArray(String[]::new));
+    public Result add(String... paths) {
+        try {
+            List<String> args = new ArrayList<>(List.of("add"));
+            args.addAll(List.of(paths));
+            return run(branchWorktree(), args.toArray(String[]::new));
+        } catch (IOException e) {
+            return new Result(false, e.getMessage());
+        }
     }
 
-    public Result commit(Path projectDir, String message) {
-        return run(projectDir, "commit", "-m", message);
+    public Result commit(String message) {
+        try {
+            return run(branchWorktree(), "commit", "-m", message);
+        } catch (IOException e) {
+            return new Result(false, e.getMessage());
+        }
     }
 
-    public Result push(Path projectDir) {
-        return run(projectDir, "push");
+    public Result push() {
+        try {
+            return run(branchWorktree(), "push");
+        } catch (IOException e) {
+            return new Result(false, e.getMessage());
+        }
+    }
+
+    private String currentBranch() {
+        Result r = run(projectDir, "rev-parse", "--abbrev-ref", "HEAD");
+        return r.success() ? r.output().trim() : "";
+    }
+
+    private void ensureBranch() throws IOException {
+        Result exists = run(projectDir, "show-ref", "--verify", "--quiet",
+                "refs/heads/" + REPORTS_BRANCH);
+        if (exists.success()) {
+            return;
+        }
+        Result created = run(projectDir, "branch", REPORTS_BRANCH);
+        if (!created.success()) {
+            throw new IOException("Could not create branch " + REPORTS_BRANCH
+                    + ": " + created.output());
+        }
+    }
+
+    private Path worktreePath() {
+        return projectDir.resolveSibling(
+                projectDir.getFileName() + ".boquila-worktree");
+    }
+
+    private void ensureWorktree(Path wt) throws IOException {
+        if (Files.exists(wt.resolve(".git"))) {
+            return;
+        }
+        if (Files.exists(wt)) {
+            try (Stream<Path> s = Files.list(wt)) {
+                if (s.findAny().isEmpty()) {
+                    Files.delete(wt);
+                } else {
+                    throw new IOException("Worktree path exists and is not a git worktree: " + wt);
+                }
+            }
+        }
+        Result added = run(projectDir, "worktree", "add", wt.toString(), REPORTS_BRANCH);
+        if (!added.success()) {
+            throw new IOException("Could not create worktree for " + REPORTS_BRANCH
+                    + ": " + added.output());
+        }
+    }
+
+    private Path branchWorktree() throws IOException {
+        ensureBranch();
+        if (REPORTS_BRANCH.equals(currentBranch())) {
+            return projectDir;
+        }
+        Path wt = worktreePath();
+        ensureWorktree(wt);
+        return wt;
+    }
+
+    public Path reportRoot() throws IOException {
+        Path wt = branchWorktree();
+        LocalDate now = LocalDate.now();
+        Path root = wt.resolve(REPORTS_DIR)
+                .resolve(String.format("%04d", now.getYear()))
+                .resolve(String.format("%02d", now.getMonthValue()));
+        Files.createDirectories(root);
+        return root;
     }
 
     private Result run(Path workDir, String... args) {

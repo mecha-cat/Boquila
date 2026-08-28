@@ -5,6 +5,8 @@ import com.example.workreport.service.GitService;
 import com.example.workreport.service.ReportService;
 import com.example.workreport.util.DeveloperStore;
 
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Bounds;
@@ -26,6 +28,7 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.stage.Popup;
+import javafx.util.Duration;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -417,35 +420,71 @@ public class MainView {
         TextField tags = new TextField(String.join(" ", original.getTags()));
         tags.setPromptText("Tags (space-separated, # optional)");
 
+        Label autoSave = new Label();
+        autoSave.setStyle("-fx-text-fill: #777;");
+
         VBox form = new VBox(6,
                 labeled("Date", date), labeled("Developer", dev),
                 labeled("Start Time (HH:MM)", start), labeled("End Time (HH:MM)", end),
                 labeled("Summary", summary), labeled("Tasks", tasks),
-                labeled("Tags", tags), labeled("Notes", notes));
+                labeled("Tags", tags), labeled("Notes", notes), autoSave);
         form.setPadding(new Insets(12));
         dialog.getDialogPane().setContent(form);
+
+        long[] lastSave = {-1};
+        Timeline saver = new Timeline(new KeyFrame(Duration.seconds(10), e -> {
+            try {
+                WorkReport draft = buildReport(date, dev, start, end,
+                        summary, tasks, tags, notes, original);
+                reportService.save(draft);
+                original.setFileName(draft.getFileName());
+                lastSave[0] = System.currentTimeMillis() / 1000;
+                autoSave.setText("Auto-saved just now");
+            } catch (IOException ex) {
+                autoSave.setText("Auto-save failed: " + ex.getMessage());
+            }
+        }));
+        saver.setCycleCount(Timeline.INDEFINITE);
+        Timeline ticker = new Timeline(new KeyFrame(Duration.seconds(1), e -> {
+            if (lastSave[0] >= 0) {
+                long ago = System.currentTimeMillis() / 1000 - lastSave[0];
+                autoSave.setText("Auto-saved " + ago + "s ago");
+            }
+        }));
+        ticker.setCycleCount(Timeline.INDEFINITE);
+        saver.play();
+        ticker.play();
+        dialog.setOnHidden(ev -> {
+            saver.stop();
+            ticker.stop();
+        });
 
         dialog.setResultConverter(bt -> {
             if (bt != ButtonType.OK) {
                 return null;
             }
-            WorkReport r = new WorkReport();
-            r.setDate(parseDate(date.getText()));
-            r.setDeveloper(dev.getText().trim());
-            r.setStartTime(parseTime(start.getText()));
-            r.setEndTime(parseTime(end.getText()));
-            r.setSummary(summary.getText());
-            r.getTasks().addAll(tasks.getText().lines().map(String::trim)
-                    .filter(l -> !l.isEmpty()).toList());
-            r.setTags(tags.getText().lines().map(String::trim)
-                    .filter(l -> !l.isEmpty())
-                    .map(t -> t.startsWith("#") ? t.substring(1) : t)
-                    .toList());
-            r.setNotes(notes.getText());
-            r.setFileName(original.getFileName());
-            return r;
+            return buildReport(date, dev, start, end, summary, tasks, tags, notes, original);
         });
         return dialog.showAndWait();
+    }
+
+    private WorkReport buildReport(TextField date, TextField dev, TextField start, TextField end,
+            TextArea summary, TextArea tasks, TextField tags, TextArea notes, WorkReport original) {
+        WorkReport r = new WorkReport();
+        r.setDate(parseDate(date.getText()));
+        r.setDeveloper(dev.getText().trim());
+        r.setStartTime(parseTime(start.getText()));
+        r.setEndTime(parseTime(end.getText()));
+        r.setSummary(summary.getText());
+        r.getTasks().addAll(tasks.getText().lines().map(String::trim)
+                .filter(l -> !l.isEmpty()).toList());
+        r.setTags(tags.getText().lines().map(String::trim)
+                .filter(l -> !l.isEmpty())
+                .map(t -> t.startsWith("#") ? t.substring(1) : t)
+                .toList());
+        r.setNotes(notes.getText());
+        r.setFileName(original.getFileName());
+        return r;
     }
 
     private String initialDeveloper(WorkReport original) {

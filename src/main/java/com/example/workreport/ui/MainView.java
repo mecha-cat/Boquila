@@ -57,8 +57,8 @@ public class MainView {
 
     public MainView(Path projectDir) {
         this.projectDir = projectDir;
-        this.reportService = new ReportService(projectDir);
         this.gitService = new GitService(projectDir);
+        this.reportService = new ReportService(gitService);
         this.developerStore.rememberAll(reportService.list().stream()
                 .map(WorkReport::getDeveloper).toList());
     }
@@ -232,7 +232,7 @@ public class MainView {
             detail.clear();
             return;
         }
-        detail.setText(ReportService.toText(r));
+        detail.setText(ReportService.toMarkdown(r));
     }
 
     private void updateGitStatus() {

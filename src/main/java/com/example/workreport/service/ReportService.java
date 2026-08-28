@@ -20,33 +20,55 @@ import java.util.stream.Stream;
 
 public class ReportService {
 
-    public static final String REPORTS_DIR_NAME = "reports";
-
     private static final DateTimeFormatter TIME_STAMP =
             DateTimeFormatter.ofPattern("HHmmssSSS");
 
-    private final Path reportsDir;
+    private final GitService gitService;
 
-    public ReportService(Path projectDir) {
-        this.reportsDir = projectDir.resolve(REPORTS_DIR_NAME);
+    public ReportService(GitService gitService) {
+        this.gitService = gitService;
     }
 
-    public Path getReportsDir() {
-        return reportsDir;
+    private Path baseDir() throws IOException {
+        Path base = gitService.reportsBase();
+        Files.createDirectories(base);
+        return base;
     }
 
-    public void ensureReportsDir() throws IOException {
-        Files.createDirectories(reportsDir);
+    private Path dirFor(WorkReport report) throws IOException {
+        Path base = gitService.reportsBase();
+        LocalDate d = report.getDate();
+        if (d == null) {
+            return gitService.reportRoot();
+        }
+        return base.resolve(String.format("%04d", d.getYear()))
+                .resolve(String.format("%02d", d.getMonthValue()));
+    }
+
+    private Path findExisting(String name) throws IOException {
+        Path base = gitService.reportsBase();
+        if (!Files.isDirectory(base)) {
+            return null;
+        }
+        try (Stream<Path> s = Files.walk(base)) {
+            return s.filter(Files::isRegularFile)
+                    .filter(p -> p.getFileName().toString().equalsIgnoreCase(name))
+                    .findFirst().orElse(null);
+        }
     }
 
     public List<WorkReport> list() {
         List<WorkReport> result = new ArrayList<>();
-        if (!Files.isDirectory(reportsDir)) {
-            return result;
-        }
-        try (Stream<Path> stream = Files.list(reportsDir)) {
-            stream.filter(p -> p.toString().toLowerCase(Locale.ROOT).endsWith(".txt"))
-                    .forEach(p -> parseFile(p).ifPresent(result::add));
+        try {
+            Path base = gitService.reportsBase();
+            if (!Files.isDirectory(base)) {
+                return result;
+            }
+            try (Stream<Path> stream = Files.walk(base)) {
+                stream.filter(Files::isRegularFile)
+                        .filter(p -> p.toString().toLowerCase(Locale.ROOT).endsWith(".md"))
+                        .forEach(p -> parseFile(p).ifPresent(result::add));
+            }
         } catch (IOException e) {
             System.err.println("Could not list reports: " + e.getMessage());
         }
@@ -59,32 +81,45 @@ public class ReportService {
     }
 
     public void create(WorkReport report) throws IOException {
-        ensureReportsDir();
-        String name = writeUnique(report);
+        Path dir = dirFor(report);
+        Files.createDirectories(dir);
+        String name = writeUnique(report, dir);
         report.setFileName(name);
     }
 
     public void save(WorkReport report) throws IOException {
-        ensureReportsDir();
+        Path dir = dirFor(report);
+        Files.createDirectories(dir);
         String current = report.getFileName();
         String desired = fileNameFor(report);
         if (current == null || current.isBlank()) {
             current = desired;
-            report.setFileName(current);
         }
-        Path target = reportsDir.resolve(current);
-        if (!desired.equals(current) && !Files.exists(reportsDir.resolve(desired))) {
-            Files.writeString(reportsDir.resolve(desired), toText(report));
-            Files.deleteIfExists(target);
+        Path existing = findExisting(current);
+        if (!desired.equals(current)) {
+            Files.writeString(dir.resolve(desired), toMarkdown(report),
+                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            if (existing != null) {
+                Files.deleteIfExists(existing);
+            } else {
+                Files.deleteIfExists(dir.resolve(current));
+            }
             report.setFileName(desired);
         } else {
-            Files.writeString(target, toText(report));
+            Path target = existing != null ? existing : dir.resolve(current);
+            Files.writeString(target, toMarkdown(report),
+                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
         }
     }
 
     public void delete(WorkReport report) throws IOException {
         String name = report.getFileName() != null ? report.getFileName() : fileNameFor(report);
-        Files.deleteIfExists(reportsDir.resolve(name));
+        Path found = findExisting(name);
+        if (found != null) {
+            Files.deleteIfExists(found);
+            return;
+        }
+        Files.deleteIfExists(dirFor(report).resolve(name));
     }
 
     public List<WorkReport> search(String query) {
@@ -96,16 +131,21 @@ public class ReportService {
     }
 
     public long countUnreadable() {
-        if (!Files.isDirectory(reportsDir)) {
+        try {
+            Path base = gitService.reportsBase();
+            if (!Files.isDirectory(base)) {
+                return 0;
+            }
+        } catch (IOException e) {
             return 0;
         }
         long count = 0;
-        try (Stream<Path> stream = Files.list(reportsDir)) {
-            for (Path p : stream
-                    .filter(f -> f.toString().toLowerCase(Locale.ROOT).endsWith(".txt"))
+        try (Stream<Path> stream = Files.walk(gitService.reportsBase())) {
+            for (Path p : stream.filter(Files::isRegularFile)
+                    .filter(f -> f.toString().toLowerCase(Locale.ROOT).endsWith(".md"))
                     .toList()) {
                 try {
-                    WorkReport r = fromText(Files.readString(p));
+                    WorkReport r = fromMarkdown(Files.readString(p));
                     if (r.getDate() == null || r.getDeveloper() == null
                             || r.getDeveloper().isBlank()) {
                         count++;
@@ -133,14 +173,14 @@ public class ReportService {
         return value != null && value.toString().toLowerCase(Locale.ROOT).contains(q);
     }
 
-    private String writeUnique(WorkReport report) throws IOException {
+    private String writeUnique(WorkReport report, Path dir) throws IOException {
         String base = fileNameFor(report);
         String stamp = LocalDateTime.now().format(TIME_STAMP);
         int attempt = 0;
         while (true) {
             String candidate = candidateName(base, stamp, attempt);
             try {
-                Files.writeString(reportsDir.resolve(candidate), toText(report),
+                Files.writeString(dir.resolve(candidate), toMarkdown(report),
                         StandardOpenOption.CREATE_NEW);
                 return candidate;
             } catch (FileAlreadyExistsException e) {
@@ -156,15 +196,15 @@ public class ReportService {
         if (attempt == 0) {
             return base;
         }
-        String core = base.substring(0, base.length() - ".txt".length());
+        String core = base.substring(0, base.length() - ".md".length());
         String suffix = attempt == 1 ? stamp : stamp + "-" + attempt;
-        return core + "-" + suffix + ".txt";
+        return core + "-" + suffix + ".md";
     }
 
     private java.util.Optional<WorkReport> parseFile(Path file) {
         try {
             String text = Files.readString(file);
-            WorkReport report = fromText(text);
+            WorkReport report = fromMarkdown(text);
             if (report.getDate() == null || report.getDeveloper() == null
                     || report.getDeveloper().isBlank()) {
                 return java.util.Optional.empty();
@@ -181,19 +221,19 @@ public class ReportService {
         String date = report.getDate() == null ? "unknown" : report.getDate().toString();
         String dev = report.getDeveloper() == null ? "unknown"
                 : report.getDeveloper().trim().replaceAll("\\s+", "-");
-        return date + "-" + dev + ".txt";
+        return date + "-" + dev + ".md";
     }
 
-    public static String toText(WorkReport r) {
+    public static String toMarkdown(WorkReport r) {
         StringBuilder sb = new StringBuilder();
+        sb.append("# Work Report\n\n");
         append(sb, "Date", r.getDate() == null ? "" : r.getDate().toString());
         append(sb, "Developer", nz(r.getDeveloper()));
         append(sb, "Start Time", r.getStartTime() == null ? "" : r.getStartTime().toString());
         append(sb, "End Time", r.getEndTime() == null ? "" : r.getEndTime().toString());
-
-        sb.append("\nSummary:\n").append(nz(r.getSummary()));
-
-        sb.append("\nTasks:\n");
+        sb.append('\n');
+        sb.append("## Summary\n\n").append(nz(r.getSummary())).append('\n');
+        sb.append("\n## Tasks\n\n");
         if (r.getTasks().isEmpty()) {
             sb.append("-");
         } else {
@@ -201,12 +241,11 @@ public class ReportService {
                 sb.append("- ").append(t).append('\n');
             }
         }
-
-        sb.append("\nNotes:\n").append(nz(r.getNotes()));
+        sb.append("\n## Notes\n\n").append(nz(r.getNotes())).append('\n');
         return sb.toString();
     }
 
-    public static WorkReport fromText(String text) {
+    public static WorkReport fromMarkdown(String text) {
         WorkReport r = new WorkReport();
         String[] lines = text.split("\\R", -1);
         StringBuilder summary = new StringBuilder();
@@ -215,25 +254,22 @@ public class ReportService {
         Section current = Section.NONE;
 
         for (String line : lines) {
-            if (line.startsWith("Summary:")) {
+            if (line.startsWith("## Summary")) {
                 current = Section.SUMMARY;
                 continue;
             }
-            if (line.startsWith("Tasks:")) {
+            if (line.startsWith("## Tasks")) {
                 current = Section.TASKS;
                 continue;
             }
-            if (line.startsWith("Notes:")) {
+            if (line.startsWith("## Notes")) {
                 current = Section.NOTES;
                 continue;
             }
             switch (current) {
                 case NONE -> {
-                    int idx = line.indexOf(':');
-                    if (idx > 0) {
-                        String key = line.substring(0, idx).trim();
-                        String value = line.substring(idx + 1).trim();
-                        applyKey(r, key, value);
+                    if (line.startsWith("**")) {
+                        applyHeader(r, line);
                     }
                 }
                 case SUMMARY -> appendLine(summary, line);
@@ -257,7 +293,13 @@ public class ReportService {
 
     private enum Section { NONE, SUMMARY, TASKS, NOTES }
 
-    private static void applyKey(WorkReport r, String key, String value) {
+    private static void applyHeader(WorkReport r, String line) {
+        int end = line.indexOf("**", 2);
+        if (end < 0) {
+            return;
+        }
+        String key = line.substring(2, end).trim().replace(":", "").trim();
+        String value = line.substring(end + 2).replaceFirst("^\\s*:\\s*", "").trim();
         switch (key) {
             case "Date" -> r.setDate(parseDate(value));
             case "Developer" -> r.setDeveloper(value);
@@ -297,7 +339,7 @@ public class ReportService {
     }
 
     private static void append(StringBuilder sb, String key, String value) {
-        sb.append(key).append(": ").append(value).append('\n');
+        sb.append("**").append(key).append(":** ").append(value).append('\n');
     }
 
     private static String nz(String s) {

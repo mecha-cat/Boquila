@@ -163,6 +163,10 @@ public class GitService {
         return root;
     }
 
+    public Path reportsBase() throws IOException {
+        return branchWorktree().resolve(REPORTS_DIR);
+    }
+
     private Result run(Path workDir, String... args) {
         List<String> cmd = new ArrayList<>();
         String git = gitExecutable();

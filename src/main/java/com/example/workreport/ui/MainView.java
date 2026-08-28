@@ -27,6 +27,7 @@ import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
+import javafx.stage.FileChooser;
 import javafx.stage.Popup;
 import javafx.util.Duration;
 
@@ -189,11 +190,95 @@ public class MainView {
         edit.setOnAction(e -> editSelected());
         Button delete = deleteButton;
         delete.setOnAction(e -> deleteSelected());
+        Button exportMd = new Button("Export .md");
+        Button exportHtml = new Button("Export HTML");
+        exportMd.disableProperty().bind(
+                table.getSelectionModel().selectedItemProperty().isNull());
+        exportHtml.disableProperty().bind(
+                table.getSelectionModel().selectedItemProperty().isNull());
+        exportMd.setOnAction(e -> exportMd(table.getSelectionModel().getSelectedItem()));
+        exportHtml.setOnAction(e -> exportHtml(table.getSelectionModel().getSelectedItem()));
 
-        HBox buttons = new HBox(8, edit, delete);
+        HBox buttons = new HBox(8, edit, delete, exportMd, exportHtml);
         buttons.setPadding(new Insets(6, 10, 10, 10));
 
         return new VBox(detail, buttons);
+    }
+
+    private void exportMd(WorkReport r) {
+        if (r == null) {
+            return;
+        }
+        FileChooser fc = new FileChooser();
+        fc.setTitle("Export Markdown");
+        fc.setInitialFileName(ReportService.fileNameFor(r));
+        fc.getExtensionFilters().add(new FileChooser.ExtensionFilter("Markdown", "*.md"));
+        java.io.File file = fc.showSaveDialog(null);
+        if (file != null) {
+            try {
+                Files.writeString(file.toPath(), ReportService.toMarkdown(r));
+            } catch (IOException ex) {
+                alert("Export failed:\n" + ex.getMessage());
+            }
+        }
+    }
+
+    private void exportHtml(WorkReport r) {
+        if (r == null) {
+            return;
+        }
+        FileChooser fc = new FileChooser();
+        fc.setTitle("Export HTML");
+        fc.setInitialFileName(ReportService.fileNameFor(r).replace(".md", ".html"));
+        fc.getExtensionFilters().add(new FileChooser.ExtensionFilter("HTML", "*.html"));
+        java.io.File file = fc.showSaveDialog(null);
+        if (file != null) {
+            try {
+                Files.writeString(file.toPath(), toHtml(r));
+            } catch (IOException ex) {
+                alert("Export failed:\n" + ex.getMessage());
+            }
+        }
+    }
+
+    private static String escapeHtml(String s) {
+        return s == null ? "" : s.replace("&", "&amp;")
+                .replace("<", "&lt;").replace(">", "&gt;");
+    }
+
+    private static String toHtml(WorkReport r) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("<!DOCTYPE html><html><head><meta charset=\"utf-8\">")
+                .append("<title>Work Report</title></head><body>");
+        sb.append("<h1>Work Report</h1>");
+        sb.append("<p>");
+        sb.append("<strong>Date:</strong> ")
+                .append(escapeHtml(r.getDate() == null ? "" : r.getDate().toString()))
+                .append("<br>");
+        sb.append("<strong>Developer:</strong> ").append(escapeHtml(r.getDeveloper())).append("<br>");
+        sb.append("<strong>Start Time:</strong> ")
+                .append(escapeHtml(r.getStartTime() == null ? "" : r.getStartTime().toString()))
+                .append("<br>");
+        sb.append("<strong>End Time:</strong> ")
+                .append(escapeHtml(r.getEndTime() == null ? "" : r.getEndTime().toString()))
+                .append("<br>");
+        if (!r.getTags().isEmpty()) {
+            sb.append("<strong>Tags:</strong> ");
+            sb.append(r.getTags().stream().map(t -> "#" + escapeHtml(t))
+                    .reduce((a, b) -> a + " " + b).orElse(""));
+        }
+        sb.append("</p>");
+        sb.append("<h2>Summary</h2><p>")
+                .append(escapeHtml(r.getSummary()).replace("\n", "<br>")).append("</p>");
+        sb.append("<h2>Tasks</h2><ul>");
+        for (String t : r.getTasks()) {
+            sb.append("<li>").append(escapeHtml(t)).append("</li>");
+        }
+        sb.append("</ul>");
+        sb.append("<h2>Notes</h2><p>")
+                .append(escapeHtml(r.getNotes()).replace("\n", "<br>")).append("</p>");
+        sb.append("</body></html>");
+        return sb.toString();
     }
 
     private void refresh() {
